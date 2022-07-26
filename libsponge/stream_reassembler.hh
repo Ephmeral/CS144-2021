@@ -19,7 +19,6 @@ class StreamReassembler {
     size_t _capacity;    //!< The maximum number of bytes
     size_t _eof;
     size_t _unassembled_len;
-    void merge();
 
   public:
    //! \brief Construct a `StreamReassembler` that will store up to `capacity`
