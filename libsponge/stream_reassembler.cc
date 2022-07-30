@@ -37,7 +37,7 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
     }
 
     size_t real_end = _firstid;
-    while (_flag[real_end % _capacity] ==true && real_end < _firstid + _capacity) {
+    while (_flag[real_end % _capacity] == true && real_end < _firstid + _capacity) {
         ++real_end;
     }
 
@@ -57,9 +57,9 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
     }
     
     if (eof) {
-        _eof = index + data.size() + 1; // 注意，这里的+1很重要
+        _eof = index + data.size() + 1; 
     }
-    if (_output.bytes_written() + 1 == _eof) { // 和上面的+1对应上
+    if (_output.bytes_written() + 1 == _eof) { 
         _output.end_input();
     }
 }
