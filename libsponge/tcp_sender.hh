@@ -8,6 +8,9 @@
 
 #include <functional>
 #include <queue>
+#include <chrono>
+#include <sys/time.h>
+#include <ctime>
 
 //! \brief The "sender" part of a TCP implementation.
 
@@ -32,7 +35,17 @@ class TCPSender {
     //! the (absolute) sequence number for the next byte to be sent
     uint64_t _next_seqno{0};
 
-  public:
+    std::queue<TCPSegment> _unrcv_queue{};
+    bool _is_syn{false};
+    bool _is_fin{false};
+    size_t _last_tick{0};
+    uint16_t _window_size{1};
+    size_t _outstanding_bytes{0};
+    uint32_t _consecutive_retransmissions_count{0};
+    int _timeout{0};
+    int _time_count{0};
+
+   public:
     //! Initialize a TCPSender
     TCPSender(const size_t capacity = TCPConfig::DEFAULT_CAPACITY,
               const uint16_t retx_timeout = TCPConfig::TIMEOUT_DFLT,
