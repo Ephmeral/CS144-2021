@@ -22,28 +22,24 @@ class TCPSender {
   private:
     //! our initial sequence number, the number for our SYN.
     WrappingInt32 _isn;
-
     //! outbound queue of segments that the TCPSender wants sent
     std::queue<TCPSegment> _segments_out{};
-
     //! retransmission timer for the connection
     unsigned int _initial_retransmission_timeout;
-
     //! outgoing stream of bytes that have not yet been sent
     ByteStream _stream;
-
     //! the (absolute) sequence number for the next byte to be sent
     uint64_t _next_seqno{0};
 
+    //队列，追踪已经发送但是未确认的段
     std::queue<TCPSegment> _unrcv_queue{};
-    bool _is_syn{false};
-    bool _is_fin{false};
-    size_t _last_tick{0};
-    uint16_t _window_size{1};
-    size_t _outstanding_bytes{0};
-    uint32_t _consecutive_retransmissions_count{0};
-    int _timeout{0};
-    int _time_count{0};
+    bool _is_syn{false}; //标记SYN是否已经设置
+    bool _is_fin{false}; //标记FIN是否已经设置
+    uint16_t _window_size{1};    //记录窗口大小
+    size_t _outstanding_bytes{0};//记录所有未确认段的字节大小总和
+    uint32_t _consecutive_retransmissions_count{0};//连续重传次数
+    int _rto{0};         //超时重传时间
+    int _timer{0};       //重传计时器
 
    public:
     //! Initialize a TCPSender
