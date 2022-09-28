@@ -22,9 +22,8 @@ class TCPConnection {
     bool _linger_after_streams_finish{true};
 
     bool _is_active{true};
-    bool _rst_states{};
     size_t _time_since_last_segment_received{0};
-    void send_segments();
+    void send_segments(bool);
 
     void send_rst_segment(bool set_rst);
   public:

@@ -60,7 +60,7 @@ class TCPState {
     static std::string state_summary(const TCPReceiver &receiver);
 
     //! \brief Summarize the state of a TCPSender in a string
-    static std::string state_summary(const TCPSender &receiver);
+    static std::string state_summary(const TCPSender &sender);
 };
 
 namespace TCPReceiverStateSummary {

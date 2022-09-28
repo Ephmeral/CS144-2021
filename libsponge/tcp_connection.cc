@@ -24,7 +24,7 @@ size_t TCPConnection::time_since_last_segment_received() const { return _time_si
 void TCPConnection::segment_received(const TCPSegment &seg) {
     _time_since_last_segment_received = 0;
     // 如果发来的是一个 ACK 包，则无需发送 ACK
-    bool need_send_ack = seg.length_in_sequence_space();
+    bool need_send_ack = seg.length_in_sequence_space() > 0;
 
     // 读取并处理接收到的数据
     // _receiver 足够鲁棒以至于无需进行任何过滤
@@ -73,15 +73,14 @@ void TCPConnection::segment_received(const TCPSegment &seg) {
     // 如果收到的数据包里没有任何数据，则这个数据包可能只是为了 keep-alive
     if (need_send_ack)
         _sender.send_empty_segment();
-    send_segments();
+    send_segments(false);
 }
 
 bool TCPConnection::active() const { return _is_active; }
 
 size_t TCPConnection::write(const string &data) {
     size_t wsize = _sender.stream_in().write(data);
-    _sender.fill_window();
-    send_segments();
+    send_segments(true);
     return wsize;
 }
 
@@ -96,7 +95,7 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
         return;
     }
     // 转发可能重新发送的数据包
-    send_segments();
+    send_segments(false);
 
     _time_since_last_segment_received += ms_since_last_tick;
 
@@ -111,14 +110,12 @@ void TCPConnection::tick(const size_t ms_since_last_tick) {
 
 void TCPConnection::end_input_stream() {
     _sender.stream_in().end_input();
-    _sender.fill_window();
-    send_segments();
+    send_segments(true);
 }
 
 void TCPConnection::connect() {
-    _sender.fill_window();
     _is_active = true;
-    send_segments();
+    send_segments(true);
 }
 
 TCPConnection::~TCPConnection() {
@@ -145,7 +142,8 @@ void TCPConnection::send_rst_segment(bool set_rst) {
     _is_active = false;
 }
 
-void TCPConnection::send_segments() {
+void TCPConnection::send_segments(bool isFillWindow) {
+    if (isFillWindow) _sender.fill_window();
     while (!_sender.segments_out().empty()) {
         TCPSegment seg = _sender.segments_out().front();
         _sender.segments_out().pop();
