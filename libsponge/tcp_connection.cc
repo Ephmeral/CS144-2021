@@ -22,98 +22,89 @@ size_t TCPConnection::unassembled_bytes() const { return _receiver.unassembled_b
 size_t TCPConnection::time_since_last_segment_received() const { return _time_since_last_segment_received; }
 
 void TCPConnection::segment_received(const TCPSegment &seg) {
-    _time_since_last_segment_received = 0;
-    // 如果发来的是一个 ACK 包，则无需发送 ACK
-    bool need_send_ack = seg.length_in_sequence_space() > 0;
+    // 处于未连接状态直接返回
+    if (!_is_active) {
+        return;
+    }
 
-    // 读取并处理接收到的数据
-    // _receiver 足够鲁棒以至于无需进行任何过滤
-    _receiver.segment_received(seg);
-
-    // 如果是 RST 包，则直接终止
-    //! NOTE: 当 TCP 处于任何状态时，均需绝对接受 RST。因为这可以防止尚未到来数据包产生的影响
+    // 接收的报文段中设置了RST标志，直接设置错误并关闭TCP连接
     if (seg.header().rst) {
         send_rst_segment(false);
         return;
     }
 
-    // 如果收到了 ACK 包，则更新 _sender 的状态并补充发送数据
-    // NOTE: _sender 足够鲁棒以至于无需关注传入 ack 是否可靠
-    assert(_sender.segments_out().empty());
-    if (seg.header().ack) {
-        _sender.ack_received(seg.header().ackno, seg.header().win);
-        // _sender.fill_window(); // 这行其实是多余的，因为已经在 ack_received 中被调用了，不过这里显示说明一下其操作
-        // 如果原本需要发送空ack，并且此时 sender 发送了新数据，则停止发送空ack
-        if (need_send_ack && !_sender.segments_out().empty())
-            need_send_ack = false;
-    }
+    // 重置收到TCP报文段的时间
+    _time_since_last_segment_received = 0;
 
-    // 如果是 LISEN 到了 SYN
+    // 没有收到RST标志，交给 receiver 进行处理
+    _receiver.segment_received(seg);
+
+    //
     if (TCPState::state_summary(_receiver) == TCPReceiverStateSummary::SYN_RECV &&
         TCPState::state_summary(_sender) == TCPSenderStateSummary::CLOSED) {
-        // 此时肯定是第一次调用 fill_window，因此会发送 SYN + ACK
         connect();
         return;
     }
 
-    // 判断 TCP 断开连接时是否时需要等待
-    // CLOSE_WAIT
-    if (TCPState::state_summary(_receiver) == TCPReceiverStateSummary::FIN_RECV &&
-        TCPState::state_summary(_sender) == TCPSenderStateSummary::SYN_ACKED)
-        _linger_after_streams_finish = false;
+    // 是否需要发送一个空的TCP数据报，用来维持 keep-alive 状态
+    // 接收的报文段如果有内容的话，考虑可能是需要维持 keep-alive 状态，设为true
+    bool send_empty = seg.length_in_sequence_space() > 0;
 
-    // 如果到了准备断开连接的时候。服务器端先断
-    // CLOSED
-    if (TCPState::state_summary(_receiver) == TCPReceiverStateSummary::FIN_RECV &&
-        TCPState::state_summary(_sender) == TCPSenderStateSummary::FIN_ACKED && !_linger_after_streams_finish) {
-        _is_active = false;
-        return;
+    // 如果接受的报文段有 ackno(序列号)，设置 sender 的确认号和窗口大小，相当于 sender 接收到一个新的确认
+    if (seg.header().ack) {
+        _sender.ack_received(seg.header().ackno, seg.header().win);
     }
 
-    // 如果收到的数据包里没有任何数据，则这个数据包可能只是为了 keep-alive
-    if (need_send_ack)
-        _sender.send_empty_segment();
+    if (send_empty) {
+        // 如果 TCPReceiver 有确认号，但是 TCPSender 没有数据，说明上面接收到的确认是一个乱序/不合理的序列号
+        // 此时发送一个空的数据报，用来维持 keep-alive 状态
+        if (_receiver.ackno().has_value() && _sender.segments_out().empty()) {
+            _sender.send_empty_segment();
+        }
+    }
+
+    // 尽可能的将 TCPSender 中的数据发送出去
     send_segments(false);
+    // 如果有需要则静默的关闭连接
+    clean_shutdown();
 }
 
 bool TCPConnection::active() const { return _is_active; }
 
 size_t TCPConnection::write(const string &data) {
-    size_t wsize = _sender.stream_in().write(data);
+    // 将数据写入 TCPSender 中，并返回实际写入数据的大小
+    size_t write_size = _sender.stream_in().write(data);
+    // 尽可能的将 TCPSender 中的数据发送出去
     send_segments(true);
-    return wsize;
+    return write_size;
 }
 
 //! \param[in] ms_since_last_tick number of milliseconds since the last call to this method
 void TCPConnection::tick(const size_t ms_since_last_tick) {
-    assert(_sender.segments_out().empty());
+    // 更新 TCPSender 的tick
     _sender.tick(ms_since_last_tick);
-    if (_sender.consecutive_retransmissions() > _cfg.MAX_RETX_ATTEMPTS) {
-        // 在发送 rst 之前，需要清空可能重新发送的数据包
+    // 连续重传次数超过上限，发送 RST 数据包，断开连接
+    if (_sender.consecutive_retransmissions() > TCPConfig::MAX_RETX_ATTEMPTS) {
         _sender.segments_out().pop();
         send_rst_segment(true);
         return;
     }
-    // 转发可能重新发送的数据包
-    send_segments(false);
-
+    // 更新上一次接收数据的时间
     _time_since_last_segment_received += ms_since_last_tick;
-
-    // 如果处于 TIME_WAIT 状态并且超时，则可以静默关闭连接
-    if (TCPState::state_summary(_receiver) == TCPReceiverStateSummary::FIN_RECV &&
-        TCPState::state_summary(_sender) == TCPSenderStateSummary::FIN_ACKED && _linger_after_streams_finish &&
-        _time_since_last_segment_received >= 10 * _cfg.rt_timeout) {
-        _is_active = false;
-        _linger_after_streams_finish = false;
-    }
+    // 尽可能的将 TCPSender 中的数据发送出去
+    send_segments(false);
+    // 如果有需要则静默的关闭连接
+    clean_shutdown();
 }
 
 void TCPConnection::end_input_stream() {
+    // 输入流结束，关闭TCPSender输出流，并且尽可能填充TCPSender，然后发送数据
     _sender.stream_in().end_input();
     send_segments(true);
 }
 
 void TCPConnection::connect() {
+    // 建立连接，并且尽可能填充TCPSender，然后发送数据
     _is_active = true;
     send_segments(true);
 }
@@ -122,7 +113,7 @@ TCPConnection::~TCPConnection() {
     try {
         if (active()) {
             cerr << "Warning: Unclean shutdown of TCPConnection\n";
-            send_rst_segment(true);
+            send_rst_segment(false);
             // Your code here: need to send an RST segment to the peer
         }
     } catch (const exception &e) {
@@ -130,28 +121,54 @@ TCPConnection::~TCPConnection() {
     }
 }
 
-void TCPConnection::send_rst_segment(bool set_rst) {
-    if (set_rst) {
-        TCPSegment rst_segment;
-        rst_segment.header().rst = true;
-        _segments_out.push(rst_segment);
+void TCPConnection::send_rst_segment(bool is_rst) {
+    // 如果需要发送RST数据报
+    if (is_rst) {
+        TCPSegment seg;
+        seg.header().rst = true;
+        _segments_out.push(seg);
     }
+    // TCPReceiver 和 TCPSender 的流设置为错误模式
     _receiver.stream_out().set_error();
     _sender.stream_in().set_error();
+    // 关闭TCP连接
     _linger_after_streams_finish = false;
     _is_active = false;
 }
 
-void TCPConnection::send_segments(bool isFillWindow) {
-    if (isFillWindow) _sender.fill_window();
+void TCPConnection::send_segments(bool is_fill_window) {
+    // 需要 TCPSender 填充窗口的情况
+    if (is_fill_window)
+        _sender.fill_window();
+    // 将 TCPSender 中的数据都发送出去
     while (!_sender.segments_out().empty()) {
+        // 从队列中取出数据
         TCPSegment seg = _sender.segments_out().front();
         _sender.segments_out().pop();
+        // 如果 TCPReceiver 有确认号，设置将每个需要发送的数据报的确认号和窗口大小
         if (_receiver.ackno().has_value()) {
             seg.header().ack = true;
             seg.header().ackno = _receiver.ackno().value();
             seg.header().win = _receiver.window_size();
         }
+        // 将数据报发送出去
         _segments_out.push(seg);
+    }
+}
+
+void TCPConnection::clean_shutdown() {
+    // CLOSE_WAIT 此时服务器等待连接关闭
+    if (TCPState::state_summary(_receiver) == TCPReceiverStateSummary::FIN_RECV &&
+        TCPState::state_summary(_sender) == TCPSenderStateSummary::SYN_ACKED) {
+        _linger_after_streams_finish = false;
+    }
+
+    // 准备断开连接
+    if (TCPState::state_summary(_receiver) == TCPReceiverStateSummary::FIN_RECV &&
+        TCPState::state_summary(_sender) == TCPSenderStateSummary::FIN_ACKED) {
+        // 如果处于 TIME_WAIT 并且超时 或者处于 CLOSE_WAIT 状态，关闭TCP连接
+        if (!_linger_after_streams_finish || _time_since_last_segment_received >= 10 * _cfg.rt_timeout) {
+            _is_active = false;
+        }
     }
 }
