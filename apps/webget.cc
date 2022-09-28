@@ -9,22 +9,22 @@ using namespace std;
 
 void get_URL(const string &host, const string &path) {
     // Your code here.
-//    CS144TCPSocket sock;
-    TCPSocket sock;
+    CS144TCPSocket sock;
+//    TCPSocket sock;
     sock.connect(Address(host, "http"));
     // GET /hello HTTP/1.1
     // auto sock2 = sock.accept();
     sock.write("GET " + path + " HTTP/1.1\r\n");
     sock.write("Host: " + host + "\r\n");
     sock.write("Connection: close\r\n\r\n");
-    // sock.shutdown(SHUT_WR);
+//     sock.shutdown(SHUT_WR);
     // cout << "here" << endl;
     
     while (!sock.eof()) {
         cout << sock.read();
     }
     sock.close();
-//    sock.wait_until_closed();
+    sock.wait_until_closed();
     // You will need to connect to the "http" service on
     // the computer whose name is in the "host" string,
     // then request the URL path given in the "path" string.
