@@ -12,43 +12,36 @@ void DUMMY_CODE(Targs &&... /* unused */) {}
 
 using namespace std;
 
-ByteStream::ByteStream(const size_t capacity) : buffer(capacity), cap(capacity)  {
-    buffer.erase(buffer.begin(), buffer.end());
-}
+ByteStream::ByteStream(const size_t capacity) : cap(capacity)  {}
 
 size_t ByteStream::write(const string &data) {
     if (input_end) {
       return 0;
     }
-    size_t pre = buffer.size();
-    for (char c : data) {
-        if (buffer.size() < this->cap) {
-            buffer.push_back(c);
-            this->write_len++;
-        } else {
-            break;
-        }
-    }
-    return buffer.size() - pre;
+    size_t len = min(data.length(), cap - buffer.size());
+    write_len += len;
+    buffer.append(BufferList(std::move(string().assign(data.begin(),data.begin()+len))));
+    return len;
 }
 
 //! \param[in] len bytes will be copied from the output side of the buffer
 string ByteStream::peek_output(const size_t len) const {
-    string ans;
-    size_t i = 0;
-    for (auto it = buffer.begin(); it != buffer.end() && i < len;
-         ++it, ++i) {
-      ans.push_back(*it);
+    size_t length = len;
+    if (length > buffer.size()) {
+        length = buffer.size();
     }
-    return ans;
+    string s= buffer.concatenate();
+    return string().assign(s.begin(), s.begin() + length);
 }
 
 //! \param[in] len bytes will be removed from the output side of the buffer
 void ByteStream::pop_output(const size_t len) { 
-    for (size_t i = 0; i < len && !buffer.empty(); i++) {
-        buffer.pop_front();
-        this->read_len++;
+    size_t length = len;
+    if (length > buffer.size()) {
+        length = buffer.size();
     }
+    read_len += length;
+    buffer.remove_prefix(length);
  }
 
 //! Read (i.e., copy and then pop) the next "len" bytes of the stream
@@ -56,14 +49,21 @@ void ByteStream::pop_output(const size_t len) {
 //! \returns a string
 std::string ByteStream::read(const size_t len) {
     string ans;
-    size_t i = 0;
-    for (auto it = buffer.begin();
-         it != buffer.end() && i < len && !buffer.empty(); ++it, ++i) {
-      ans.push_back(*it);
-      buffer.pop_front();
-      this->read_len++;
+//    size_t i = 0;
+    size_t length = len;
+    if (length > buffer.size()) {
+        length = buffer.size();
     }
-    return ans;
+    string s = buffer.concatenate();
+    buffer.remove_prefix(length);
+    read_len += length;
+//    for (auto it = buffer.begin();
+//         it != buffer.end() && i < len && !buffer.empty(); ++it, ++i) {
+//      ans.push_back(*it);
+//      buffer.pop_front();
+//      this->read_len++;
+//    }
+    return string().assign(s.begin(), s.begin() + length);
 }
 
 void ByteStream::end_input() { input_end = true; }
@@ -72,9 +72,9 @@ bool ByteStream::input_ended() const { return input_end; }
 
 size_t ByteStream::buffer_size() const { return buffer.size(); }
 
-bool ByteStream::buffer_empty() const { return buffer.empty(); }
+bool ByteStream::buffer_empty() const { return buffer.size() == 0; }
 
-bool ByteStream::eof() const { return buffer.empty() && this->input_end; }
+bool ByteStream::eof() const { return buffer.size() == 0 && this->input_end; }
 
 size_t ByteStream::bytes_written() const { return this->write_len; }
 
