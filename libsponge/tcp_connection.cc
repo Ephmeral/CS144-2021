@@ -154,6 +154,7 @@ void TCPConnection::send_segments(bool is_fill_window) {
         // 将数据报发送出去
         _segments_out.push(seg);
     }
+    clean_shutdown();
 }
 
 void TCPConnection::clean_shutdown() {
