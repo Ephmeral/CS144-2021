@@ -15,7 +15,7 @@ class ByteStream {
     // Your code here -- add private members as necessary.
    BufferList buffer{};
    size_t cap;
-   size_t size = 0;
+//   size_t size = 0;
    size_t read_len = false;
    size_t write_len = false;
    bool input_end = false; //!< Flag indicating that input end

@@ -30,7 +30,7 @@ string ByteStream::peek_output(const size_t len) const {
     if (length > buffer.size()) {
         length = buffer.size();
     }
-    string s= buffer.concatenate();
+    string s = buffer.concatenate();
     return string().assign(s.begin(), s.begin() + length);
 }
 

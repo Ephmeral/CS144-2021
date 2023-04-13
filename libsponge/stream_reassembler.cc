@@ -39,7 +39,7 @@ void StreamReassembler::push_substring(const string &data, const size_t index, c
 
     //找到真正写入的字符串结尾位置
     size_t real_end = _firstid;
-    while (_flag[real_end % _capacity] ==true && real_end < _firstid + _capacity) {
+    while (_flag[real_end % _capacity] && real_end < _firstid + _capacity) {
         ++real_end;
     }
 
